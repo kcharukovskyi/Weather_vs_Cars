@@ -1,0 +1,588 @@
+---
+title: "Final Project"
+subtitle: "**Weather VS Cars**"
+author: 
+  - "Mariia Pidhorna"
+  - "Karina Diachenko" 
+  - "Kostiantyn Charukovskyi"
+
+  
+from: markdown+emoji
+title-slide-attributes:
+  data-background-iframe: colored-particles/index.html
+  # data-background-color: "#eef3f8"
+# language: _language-ua.yml
+footer: 🔗 <a href="https://github.com/kcharukovskyi/Weather_vs_Cars">Link to the source repo</a>
+format: 
+  revealjs:
+    navigation-mode: grid
+    transition: fade
+    chalkboard: false
+
+    code-line-numbers: false
+    slide-number: true
+    mouse-wheel: true
+    width: 1350  
+    height: 759.375
+    highlight-style: github
+    pdf-separate-fragments: true
+    theme: [default, custom.scss]
+knitr: 
+  opts_chunk: 
+    echo: true
+    warnings: false
+    message: false
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r}
+#| label: setup
+#| include: false
+
+library(pacman)
+
+p_load(tidyverse, vroom, stringr, lsr)
+
+set.seed(123)
+
+# Define colors
+red_pink   = "#e64173"
+turquoise  = "#20B2AA"
+orange     = "#FFA500"
+red        = "#fb6107"
+blue       = "#181485"
+navy       = "#150E37FF"
+green      = "#8bb174"
+yellow     = "#D8BD44"
+grey_light = "grey70"
+grey_mid   = "grey50"
+grey_dark  = "grey20"
+purple     = "#6A5ACD"
+slate      = "#314f4f"
+```
+
+```{r}
+#| label: manipulation
+#| include: false
+#| cache: true
+
+crashes_tbl_raw <- vroom::vroom(
+  "/home/yawog/Downloads/US_Accidents_March23.csv",
+  col_select = c(
+    "Start_Time",
+    "Severity",
+    "Temperature(F)",
+    "Humidity(%)",
+    "Pressure(in)",
+    "Wind_Speed(mph)",
+    "Precipitation(in)",
+    "Civil_Twilight",
+    "Weather_Condition"
+  )
+)
+
+
+# Перевод у метричну систему
+# Сеплування по роках в 1М записів
+# Факторизація змінних 
+# Зміна кількості факторів у Weather_Condition
+crashes_tbl_raw |> 
+
+  transmute(
+    Year = factor(year(Start_Time)),
+    Severity = factor(Severity),
+    Temperature = (`Temperature(F)` - 32) * 5 / 9,          
+    Humidity = `Humidity(%)`,                                
+    Pressure = `Pressure(in)` * 33.8639,                     
+    Wind_Speed = `Wind_Speed(mph)` * 1.60934,               
+    Precipitation = `Precipitation(in)` * 25.4,   
+    Twilight = factor(Civil_Twilight),
+    Weather_Condition = factor(Weather_Condition)
+  ) |> 
+
+
+  mutate(
+    Weather_Condition = factor(
+      case_when(
+        str_detect(Weather_Condition, "Snow|Sleet|Ice|Wintry|Freez|Pellet") ~ "Snow/Ice",
+        str_detect(Weather_Condition, "Thunder|T-Storm|Heavy Rain|Heavy Drizzle|Storm") ~ "Storm",
+        str_detect(Weather_Condition, "Light Rain|Drizzle|Shower|Rain") ~ "Rain",
+        str_detect(Weather_Condition, "Fog|Haze|Mist|Smoke") ~ "Fog/Haze",
+        str_detect(Weather_Condition, "Cloud|Overcast") ~ "Cloudy",
+        str_detect(Weather_Condition, "Clear|Fair") ~ "Clear",
+        str_detect(Weather_Condition, "Dust|Sand") ~ "Dust/Sand",
+        str_detect(Weather_Condition, "Windy") ~ "Windy",
+        TRUE ~ "Other"
+      )
+    )
+  ) |> 
+  
+  group_by(Year) |> 
+  slice_sample(n = 200000) |> ungroup() -> crashes_sample
+
+Condition_Weather <- factor(crashes_tbl_raw$Weather_Condition)
+
+# crashes_tbl_raw |> 
+#   count(Weather_Condition) |> 
+#   arrange(n) |> 
+#   print( n = 1000)
+
+# Перевірка NA
+# Чистка даних
+
+na_info <- crashes_sample |> 
+  summarise(
+    across(
+      c(Severity, Temperature, Humidity, Pressure, Wind_Speed, Precipitation, Twilight, Weather_Condition),
+      ~ round(mean(is.na(.)) * 100, 2)
+    )
+  ) |> pivot_longer(cols = everything(), names_to = "Column", values_to = "Percent_NA")
+
+crashes_sample |> 
+group_by(Weather_Condition) |> 
+mutate(
+  Precipitation = if_else(
+    is.na(Precipitation),
+    median(Precipitation, na.rm = TRUE),
+    Precipitation
+  ),
+  Wind_Speed = if_else(
+    is.na(Wind_Speed),
+    median(Wind_Speed, na.rm = TRUE),
+    Wind_Speed
+  )
+) |> drop_na() |> ungroup() -> crashes_sample_done 
+
+
+
+rm(crashes_tbl_raw, crashes_sample)
+gc()
+
+```
+
+```{r}
+#| label: ranging
+#| include: false
+#| cache: true
+
+done <- crashes_sample_done |> 
+  mutate(
+  
+    Temp_Score = case_when(
+      Temperature < -10 ~ 4,
+      Temperature < 0   ~ 3,
+      Temperature < 10  ~ 1,
+      Temperature < 25  ~ 0,
+      Temperature < 35  ~ 1,
+      TRUE              ~ 2
+    ),
+    Wind_Score = case_when(
+      Wind_Speed < 10 ~ 0,
+      Wind_Speed < 20 ~ 1,
+      Wind_Speed < 30 ~ 2,
+      Wind_Speed < 50 ~ 3,
+      TRUE            ~ 4
+    ),
+    Precip_Score = case_when(
+      Precipitation == 0 ~ 0,
+      Precipitation < 2  ~ 1,
+      Precipitation < 7  ~ 2,
+      Precipitation < 20 ~ 3,
+      TRUE               ~ 4
+    ),
+    Humidity_Score = case_when(
+      Humidity < 30 ~ 1,
+      Humidity < 50 ~ 0,
+      Humidity < 70 ~ 1,
+      Humidity < 85 ~ 2,
+      TRUE          ~ 3
+    ),
+    Pressure_Score = case_when(
+      Pressure < 100  ~ 2,
+      Pressure <= 102 ~ 0,
+      Pressure <= 104 ~ 1,
+      TRUE            ~ 2
+    ),
+
+    Weather_Severity_Score = Temp_Score + Wind_Score + 
+                             Precip_Score + Humidity_Score + 
+                             Pressure_Score
+  ) |> 
+  
+  mutate(
+    Weather_Severity_Level = factor(case_when(
+      Weather_Severity_Score <= 3  ~ "Mild",
+      Weather_Severity_Score <= 6  ~ "Moderate",
+      Weather_Severity_Score <= 9  ~ "Severe",
+      TRUE                         ~ "Extreme"
+    ), levels = c("Mild", "Moderate", "Severe", "Extreme"))
+  ) |> 
+  
+  transmute(
+    Severity,
+    Weather_Severity_Level
+  )
+```
+
+```{r}
+#| label: testing
+#| include: false
+
+tbl <- table(done$Severity, done$Weather_Severity_Level)
+
+chi <- chisq.test(tbl)
+
+cram <- cramersV(tbl)
+
+```
+
+```{r}
+#| label: visual
+#| include: false
+
+custom_theme <- theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    plot.background = element_rect(fill = "white", color="white"),
+    axis.line = element_blank(),
+    text = element_text(size = 16, family = 'Noto Sans'),
+    axis.title.x = element_text(margin = margin(t = 10, b= 0)),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, color=grey_dark,
+                               margin = margin(t=10)),
+    axis.text.y = element_text(color=grey_dark,
+                               margin = margin(r=10)),
+    panel.grid.major.y = element_line(color=grey_mid, linewidth=0.25, linetype = 'dashed'),
+    legend.title=element_blank(),
+    plot.title.position = "plot", 
+    plot.caption.position =  "plot",
+    plot.title = element_text(size = 22, face = 'bold', margin = margin(t=5, r=5, b=20, l=5)),
+    plot.caption = element_text(face='italic',
+                                margin = margin(t=5, r=0, b=2, l=5), color = grey_mid),
+    plot.margin = unit(c(1,1,0.5,1), 'cm'),
+    legend.text = element_text(size = 12),
+    legend.position = 'top',
+    plot.subtitle = element_text(size = 14, margin = margin(t=5, r=5, b=20, l=5))
+  )
+
+chisq_visual <- done |> ggplot(aes(fill=Weather_Severity_Level, x=Severity,)) + geom_bar(position = 'fill') + 
+  labs(x = 'Car Crash Severity', title= 'Weather Conditions by  \nCrash Severity Level in the U.S.', caption='Source: US_Accidents_March23.csv, Kaggle') + custom_theme + scale_fill_manual(values = c(green, orange, red, turquoise))
+chisq_visual  
+
+missing_values <- na_info |> ggplot(aes(Percent_NA, reorder(Column, Percent_NA), fill = Percent_NA)) + geom_col(width = 0.5) + custom_theme + scale_fill_gradient(low = turquoise, high = orange) + labs(
+  subtitle = "Missing Data by Column, %",
+ # subtitle = "Percent of missing values in each variable (sample of 1.6M rows)",
+  x = NULL) +
+theme(legend.position = "right", plot.subtitle = element_text(face = 'bold'))
+missing_values
+```
+
+# ⭕ Long story short
+
+::: {.fragment .fade-in}
+::: {.red}
+**Our motivation:**
+:::
+
+We want to understand how harsher weather might lead to more serious accidents. Learning about the impact of factors like temperature, precipitation, and wind can help us see if and how weather raises the risk of severe crashes. Such insights can be used to create better safety tips, plan public warnings, and adjust traffic rules, ultimately making roads safer for everyone.
+:::
+
+::: {.fragment .fade-in}
+::: {.red}
+**Research question:**
+:::
+
+
+> Is there an association between the **severity** of traffic accidents and a harshness of weather condition?
+:::
+
+
+# 🔢 Dataset: US Traffic Accidents
+
+::: columns
+
+::: {.column width="25%"}
+::: {.fragment .fade-in}
+
+:::{.callout-tip}
+## Quick Glance
+- ~7M rows
+- 46 variables
+- Source: [Kaggle](https://www.kaggle.com/datasets/sobhanmoosavi/us-accidents)
+- 9 variables in use
+:::
+:::
+:::
+
+::: {.column width="3%"}
+:::
+
+::: {.column width="72%"}
+::: {.fragment .fade-in}
+
+This dataset is a collection of over 2.8 million road accidents recorded across the US between 2016 and 2021. The data was gathered from various sources, including traffic sensors, news reports, and social media, and provides detailed information about the timing, location, **environmental conditions**, and **severity** of traffic accidents.
+:::
+:::
+:::
+
+## 📑 Data Dictionary {.smaller}
+
+- `Start_Time`, *(num)*: an exact timestamp when the accident began.
+
+- `Severity`, *(cat)*: an indicator of how traffic was impacted by incident, on a scale from 1 to 4, where 4 represents the most severe incident.
+
+- `Weather_Condition`, *(cat)*: weather during the incident, such as Clear, Rain or Snow.
+    
+- `Temperature(F)`, *(num)*: air temperature,
+
+- `Humidity(%)`, *(num)*: percentage of relative humidity
+
+- `Pressure(in)`, *(num)*: atmospheric presure 
+
+- `Wind_Speed(mph)`, *(num)*: speed of wind
+
+- `Precipitation (in)`, *(num)*: an amount of precipitation in inches.
+
+- `Civil_Twilight`, *(cat)*: indicator of day/night
+    
+
+
+
+    
+
+    
+
+
+
+# 👨🏿‍💻 Data Manipulation and Cleaning
+
+::: incremental
+- Downloaded needed columns via `vroom`
+
+- We are proud Europeans, so we converted values into metric system
+
+- We factorised all categorical variables and noticed this nightmare:
+:::
+
+::: footer
+🔗 [R code source](https://quarto.org/docs/output-formats/html-code.html#highlighting)
+:::
+
+## 🧛 Nightmare
+```{r}
+length(levels(Condition_Weather)) # Initial variable
+```
+
+::: {.fragment .fade-in}
+- So with God's help and `case_when` we reduced this number to 9:
+
+``` r
+Weather_Condition = factor(
+      case_when(
+        str_detect(Weather_Condition, "Snow|Sleet|Ice|Wintry|Freez|Pellet") ~ "Snow/Ice",
+        str_detect(Weather_Condition, "Thunder|T-Storm|Heavy Rain|Heavy Drizzle|Storm") ~ "Storm"
+...
+```
+
+```{r}
+length(levels(crashes_sample_done$Weather_Condition))
+```
+
+:::
+
+# 👨🏿‍💻 Let's continue our data preparation!
+
+::: {.fragment .fade-in}
+- We grouped rows by `Year` and sampled each group up to 200k records (my laptop is still alive owing to this step)
+:::
+
+::: {.fragment .fade-in}
+- It's time to check `NA`-values!
+
+```{r}
+#| echo: false
+#| fig-align: "center"
+# na_info |> 
+#   select(!Weather_Condition)
+
+missing_values
+```
+
+:::
+
+## ❌ NAs handling
+
+::: incremental
+- We couldn't endure with $38\%$ of missing values in `Percipitation`. We decided to group rows by `Weather_Condition` and fill missing values with **mean** value of the group. Still it's not a perfection, but better than delete the half of data.
+
+- After that we just delete `NA`-s in other columns.
+:::
+
+# <span style="font-size: 4rem;">🔑 Creating of Aggregated Variable</span> {.smaller}
+
+::: columns
+
+::: {.column width="50%"}
+::: {.fragment .fade-in}
+
+We tried a lot of methods, but we chosed to use old-fashioned method: **subjective indexing**.
+
+Based on meteorological traditions, we ranked each variable to severeral categories, where is $0$ -- there is no influence on driving and $4$ -- condition extremely endangeres driving expirience:
+
+``` r
+
+crashes_sample_done %>%
+  mutate(
+    Temp_Score = case_when(
+      Temperature < -10 ~ 4,
+      Temperature < 0   ~ 3,
+      Temperature < 10  ~ 1,
+...      
+    Weather_Severity_Score = Temp_Score + Wind_Score + 
+    Precip_Score + Humidity_Score + 
+    Pressure_Score  
+
+```
+:::
+:::
+
+
+::: {.column width="50%"}
+::: {.fragment .fade-in}
+
+After aggregation we create a list of categories, based on `Severity_Score`:
+
+``` r
+mutate(
+    Weather_Severity_Level = factor(case_when(
+      Weather_Severity_Score <= 3  ~ "Mild",
+      Weather_Severity_Score <= 6  ~ "Moderate",
+      Weather_Severity_Score <= 9  ~ "Severe",
+      TRUE                         ~ "Extreme"
+    ), levels = c("Mild", "Moderate", "Severe", "Extreme"))
+  )
+```
+:::
+
+::: {.fragment .fade-in}
+
+```{r}
+#| echo: false
+head(done)
+```
+
+::: {.red}
+**Now our data is ready to stastical magic!**
+:::
+:::
+:::
+:::
+
+# 🔍 Methodology
+
+::: {.fragment .fade-in}
+::: {.orange}
+$\chi^2$-test:
+:::  
+
+- Two categorical variables
+- Detects association
+- Observed vs expected frequency
+  
+:::
+
+
+::: {.fragment .fade-in}
+::: {.red}
+Cramer's V test:
+:::
+
+- Based on chi squared statistic
+- Measures strength of assosiation
+- Takes into account sample size and number of categories
+
+:::
+
+# 🧪 $\chi^2$-test: part 1
+
+::: columns
+
+::: {.column width="40%"}
+
+**Hypothesis:**
+
+- `H0`: There is NO association between accident severity and weather harshness
+
+- `H1`: There is INDEED association between accident severity and weather harshness.
+
+:::
+
+::: {.column width="55%"}
+
+```{r}
+#| echo: false
+#| fig-width: 6
+#| fig-height: 5.5
+#| out.width: "100%" 
+
+
+chisq_visual
+```
+:::
+:::
+
+
+# 🧪 $\chi^2$-test: part 2
+
+::: {.orange}
+$\chi^2$-test results:
+```{r}
+#| echo: false
+chi
+```
+:::
+
+::: {.red}
+Cramer's V test results:
+:::
+
+```{r}
+#| echo: false
+cram
+```
+
+# ❗ Conclusion...
+
+- A statistically significant relationship was found between accident severity and weather conditions.
+
+- BUT the effect size (Cramer’s V ~ $0.02$) is almost invisible.
+
+- SO weather likely plays a minor role in determining severity.
+- More impactful factors may include driver behavior, road infrastructure, and vehicle safety features.
+
+
+## ❓ ...and Limitations 
+
+- Subjective categorising
+- Generated values (38% of `NA`-s in Precipitation)
+- Data slicing
+- Huge dataset for $\chi^2$-test
+
+
+
+# <span class="h1">Q&A</span> {.unnumbered .unlisted background-iframe="colored-particles/index.html"}
+
+<hr class="hr">
+
+
+
+**_Thank you for your attention!_**
+
+- **Mariia**: Visualizations, methodology and testing hypothesis
+
+- **Karina**: Formulating of research question, structurising of information and analysing of dataset
+
+- **Kostiantyn**: Data manipulations and cleaning, technical side of presentation
