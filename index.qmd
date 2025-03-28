@@ -1,6 +1,6 @@
 ---
 title: "Weather VS Cars"
-subtitle: '**Final Project: `Purrrs Team`**'
+subtitle: '**Final Project: Purrrs Team**'
 author: 
   - "Mariia Pidhorna"
   - "Karina Diachenko" 
