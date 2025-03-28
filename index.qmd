@@ -1,6 +1,6 @@
 ---
-title: "Final Project"
-subtitle: "**Weather VS Cars**"
+title: "Weather VS Cars"
+subtitle: '**Final Project: `Purrrs Team`**'
 author: 
   - "Mariia Pidhorna"
   - "Karina Diachenko" 
@@ -11,7 +11,7 @@ from: markdown+emoji
 title-slide-attributes:
   data-background-iframe: colored-particles/index.html
   # data-background-color: "#eef3f8"
-# language: _language-ua.yml
+
 footer: 🔗 <a href="https://github.com/kcharukovskyi/Weather_vs_Cars">Link to the source repo</a>
 format: 
   revealjs:
@@ -20,7 +20,7 @@ format:
     chalkboard: false
 
     code-line-numbers: false
-    slide-number: true
+    slide-number: true 
     mouse-wheel: true
     width: 1350  
     height: 759.375
